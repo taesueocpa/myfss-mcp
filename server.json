@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "kr.eocpa/myfss",
+  "title": "MyFSS",
+  "description": "Full-text search over FSS/FSC accounting supervision documents for Korean accounting professionals",
+  "version": "0.18.1",
+  "websiteUrl": "https://eocpa.kr/myfss",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://myfss.eocpa.kr/mcp",
+      "headers": [
+        {
+          "name": "x-eocpa-token",
+          "description": "eocpa token (https://eocpa.kr/token) — shared across MyDART·MyKIFRS·MyFSS. Required for tool calls; discovery (tools/list) works without it.",
+          "isSecret": true,
+          "isRequired": true
+        }
+      ]
+    }
+  ]
+}

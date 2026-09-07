@@ -1,0 +1,25 @@
+{
+  "name": "myfss-mcp",
+  "version": "0.18.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "MyFSS MCP — full-text search over FSS/FSC accounting and disclosure supervision documents",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/main.js --http",
+    "stdio": "node build/main.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.2.0",
+    "express": "^5.2.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}

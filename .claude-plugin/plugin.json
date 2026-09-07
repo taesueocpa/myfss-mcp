@@ -1,0 +1,41 @@
+{
+  "name": "myfss",
+  "version": "0.18.1",
+  "description": "금융감독원·금융위원회 회계·공시 자료(감독지침·심사감리 지적사례·모범사례·보도자료 등 11개 게시판, 2010년 이후) 전문검색 — MCP 도구 5개",
+  "author": {
+    "name": "eocpa.kr",
+    "email": "contact@eocpa.kr",
+    "url": "https://github.com/taesueocpa"
+  },
+  "homepage": "https://eocpa.kr/myfss",
+  "repository": "https://github.com/taesueocpa/myfss-mcp",
+  "license": "MIT",
+  "keywords": [
+    "fss",
+    "금융감독원",
+    "금융위원회",
+    "회계감리",
+    "감독지침",
+    "accounting-supervision",
+    "finance-ai",
+    "mcp"
+  ],
+  "mcpServers": {
+    "myfss": {
+      "type": "http",
+      "url": "https://myfss.eocpa.kr/mcp",
+      "headers": {
+        "x-eocpa-token": "${user_config.token}"
+      }
+    }
+  },
+  "userConfig": {
+    "token": {
+      "type": "string",
+      "title": "eocpa token (필수)",
+      "description": "https://eocpa.kr/token 에서 발급. MyDART·MyKIFRS·MyFSS 공용. 도구 호출에 필수입니다(없으면 401). 목록 조회만 자격 없이 됩니다.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}
