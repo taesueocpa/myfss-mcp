@@ -96,8 +96,8 @@ export function buildInstructions(opts: ChannelOptions): string | undefined {
         liteLines
       : "") +
     (hidden.length
-      ? `\n\n### Not listed here\n\n${hidden.join(", ")} — not registered in this channel ` +
-        `(server usage statistics, not corpus data). Use ${opts.mainEndpoint} if you need it.`
+      ? `\n\n### Not listed here\n\n${hidden.join(", ")} — not registered in this channel. ` +
+        `Use ${opts.mainEndpoint} if you need it.`
       : "")
   );
 }

@@ -21,7 +21,6 @@ What the regulator checks is written down: in review findings, in guidance, in t
 | `get_document` | `ntt_id`, `max_chars?`, `offset_chars?` | Document metadata plus the attachment body as Markdown, paged with `offset_chars` |
 | `list_recent` | `limit?`, `board?` | Latest documents by publication date |
 | `list_tags` | — | The vocabulary that filters accept: topics, natures, boards (key and label), top departments |
-| `get_usage_stats` | `days?` | Aggregate server usage statistics |
 
 Every tool is read-only, idempotent, and local (SQLite + FTS5). No external call is made while serving a request.
 
@@ -88,7 +87,7 @@ A tool call without a credential returns `401`; a credential that is present but
 
 ### PlayMCP channel
 
-`https://myfss.eocpa.kr/mcp/playmcp` is the same server behind the same authentication, with the response contract the PlayMCP platform requires: every tool result stays within 24,000 characters. On this channel `get_document` defaults to `max_chars=18000` (the schema advertises that default; pass `max_chars` explicitly to override, and page with `offset_chars`). Results that would still exceed the budget are structurally truncated and flagged with `playmcp_truncated: true`, a `playmcp_truncation_note`, and `playmcp_text_truncated` on any object whose text was cut. `get_usage_stats` is not registered on this channel. The standard `/mcp` endpoint never truncates and keeps the 60,000-character default.
+`https://myfss.eocpa.kr/mcp/playmcp` is the same server behind the same authentication, with the response contract the PlayMCP platform requires: every tool result stays within 24,000 characters. On this channel `get_document` defaults to `max_chars=18000` (the schema advertises that default; pass `max_chars` explicitly to override, and page with `offset_chars`). Results that would still exceed the budget are structurally truncated and flagged with `playmcp_truncated: true`, a `playmcp_truncation_note`, and `playmcp_text_truncated` on any object whose text was cut. The standard `/mcp` endpoint never truncates and keeps the 60,000-character default.
 
 ## Data and terms of use
 

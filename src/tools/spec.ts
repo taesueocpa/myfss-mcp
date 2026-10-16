@@ -56,7 +56,7 @@ export interface ToolSpec<Shape extends z.ZodRawShape = z.ZodRawShape> {
   annotations: ToolHints;
   /**
    * [PlayMCP] /mcp/playmcp 채널에서 이 도구를 등록하지 않는다 — 기본 false.
-   * 운영 도구(사용량 통계)처럼 PlayMCP 최종 이용자에게 가치가 없는 도구만 true. 메인 /mcp 는 무관.
+   * 운영 도구처럼 PlayMCP 최종 이용자에게 가치가 없는 도구만 true(현재 해당 없음). 메인 /mcp 는 무관.
    */
   hiddenInPlaymcp?: boolean;
   /**
