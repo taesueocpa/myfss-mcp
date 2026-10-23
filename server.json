@@ -3,7 +3,7 @@
   "name": "kr.eocpa/myfss",
   "title": "MyFSS",
   "description": "Full-text search over FSS/FSC accounting supervision documents for Korean accounting professionals",
-  "version": "0.20.0",
+  "version": "0.22.0",
   "websiteUrl": "https://eocpa.kr/myfss",
   "remotes": [
     {

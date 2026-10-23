@@ -5,7 +5,9 @@
  *  - POST /mcp         메인 채널 — 무절단
  *  - POST /mcp/playmcp PlayMCP 채널 — 응답 예산 가드 + 채널 기본값 + 운영 도구 미등록
  *                      (playmcp-profile.ts). 두 MCP 경로의 차이는 프로필뿐 — Origin 검증·인증·
- *                      레이트리밋·usage 로깅은 공통.
+ *                      레이트리밋·usage 로깅은 공통. 두 경로 모두 era 를 가린다(modern.ts
+ *                      `isLegacyRequest`): 모던(MCP 2026-07-28)은 `createMcpHandler` 레그가,
+ *                      2025-era(initialize 핸드셰이크)는 Streamable HTTP 전송 레그가 맡는다.
  *  - GET  /health      공개 헬스체크
  *  - GET  / · /token · POST /signup → eocpa.kr 로 리다이렉트(랜딩·토큰 발급 페이지)
  *
@@ -22,7 +24,8 @@
  *  - PLAYMCP_LIMIT · PLAYMCP_LIMIT_UNIT (playmcp-budget.ts — 기본 24000 chars)
  *  - MCP_ALLOWED_ORIGINS (/mcp Origin 허용목록, 콤마 구분 — 부재 Origin 은 항상 통과)
  */
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createMcpHandler, isLegacyRequest } from "@modelcontextprotocol/server";
+import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from "@modelcontextprotocol/node";
 import express from "express";
 import type Database from "better-sqlite3";
 import { openCorpus } from "../store/fss-db.js";
@@ -156,6 +159,55 @@ export function createApp(deps: AppDeps): express.Express {
     res.json({ status: "ok", db: d ? "ready" : "missing", docs, name: SERVER_NAME, version: VERSION });
   });
 
+  /**
+   * 모던 레그의 usage 세션 — 팩토리는 요청 객체만 받으므로(McpRequestContext.requestInfo) 토큰을
+   * 여기서 다시 꺼낸다. 슬롯 우선순위·판정은 auth.ts `extractToken` 한 곳이 소유하고, 이 함수는
+   * web `Request` 를 그 입력 꼴로 옮기는 어댑터일 뿐이다(정책 복제가 아니다).
+   */
+  const sessionFromRequest = (request: Request | undefined) => {
+    const h = request?.headers;
+    const key = request ? new URL(request.url).searchParams.get("key") : null;
+    const provided = extractToken(key ?? undefined, {
+      authorization: h?.get("authorization") ?? undefined,
+      "x-eocpa-token": h?.get("x-eocpa-token") ?? undefined,
+      "x-api-key": h?.get("x-api-key") ?? undefined,
+    });
+    return {
+      userHash: hashToken(provided),
+      isOwner: gate.isAdmin(provided),
+      transport: "http" as const,
+      client: h?.get("user-agent") ?? undefined,
+    };
+  };
+
+  /**
+   * 모던(2026-07-28) 레그 — **프로세스당 프로필별 1벌**. 핸들러가 요청마다 팩토리를 부르므로
+   * 서버 인스턴스는 여전히 요청 단위다(stateless).
+   *   legacy: "reject" = 이 레그는 모던 전용이고 2025-era 는 아래 전송 배선이 그대로 서빙한다.
+   *   responseMode: "json" = 중간 알림을 보내지 않으므로 단일 JSON 응답.
+   * 코퍼스가 없으면(getDb null) 여기까지 오지 않는다 — 아래 핸들러가 먼저 503 을 낸다.
+   */
+  const modernMcp: Record<McpProfile, ReturnType<typeof toNodeHandler>> = {
+    full: toNodeHandler(
+      createMcpHandler(
+        (mcpCtx) => buildServer(
+          { corpus: getDb()!, usage, session: sessionFromRequest(mcpCtx.requestInfo) },
+          { profile: "full" },
+        ),
+        { legacy: "reject", responseMode: "json" },
+      ),
+    ),
+    playmcp: toNodeHandler(
+      createMcpHandler(
+        (mcpCtx) => buildServer(
+          { corpus: getDb()!, usage, session: sessionFromRequest(mcpCtx.requestInfo) },
+          { profile: "playmcp" },
+        ),
+        { legacy: "reject", responseMode: "json" },
+      ),
+    ),
+  };
+
   // ── MCP ───────────────────────────────────────────────────────────
 
   const mcpHandler = (profile: McpProfile) => async (req: express.Request, res: express.Response) => {
@@ -196,8 +248,18 @@ export function createApp(deps: AppDeps): express.Express {
       });
     }
     try {
+      // era 분기 — SDK 자신의 분류기로 가린다. 모던 envelope(요청마다 `_meta` 로 버전을 주장하는
+      // 2026-07-28)이면 modern 레그, 아니면(`initialize`·2025-era POST) 아래 전송 레그다.
+      // express.json 이 본문을 이미 소진했으므로 parsedBody 로 넘긴다(스트림 재독 없음).
+      const legacyEra = await isLegacyRequest(await toWebRequest(req, req.body), req.body);
+      if (!legacyEra) {
+        // 모던(2026-07-28) — discover·resultType·헤더-본문 대조·캐시 힌트는 SDK 가 처리한다.
+        await modernMcp[profile](req, res, req.body);
+        return;
+      }
+
       const server = buildServer({ corpus: d, usage, session }, { profile });
-      const transport = new StreamableHTTPServerTransport({
+      const transport = new NodeStreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // stateless
         enableJsonResponse: true,
       });
@@ -272,7 +334,7 @@ export async function serveHttp(): Promise<void> {
   app.listen(PORT, () => {
     console.error(
       `myfss MCP HTTP 서버 v${VERSION}: :${PORT}/mcp · /mcp/playmcp (DB ${getDb() ? "ready" : "missing"}, ` +
-      `토큰 검증 ${validateUrl})`,
+      `토큰 검증 ${validateUrl}, dual-era: 2025-era + 2026-07-28)`,
     );
   });
 }

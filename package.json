@@ -1,6 +1,6 @@
 {
   "name": "myfss-mcp",
-  "version": "0.20.0",
+  "version": "0.22.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -11,7 +11,8 @@
     "stdio": "node build/main.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/node": "^2.1.1",
+    "@modelcontextprotocol/server": "^2.3.1",
     "better-sqlite3": "^12.2.0",
     "express": "^5.2.1",
     "zod": "^4.4.3"

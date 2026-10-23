@@ -5,6 +5,7 @@ Full-text search over the accounting and disclosure supervision documents publis
 The corpus covers eleven boards from 2010 onward: supervisory guidance (감독지침), audit review findings (심사·감리 지적사례), enforcement results (회계감리결과제재), model note disclosures (주석공시 모범사례), accounting supervision trends, external audit materials, ICFR (내부회계관리제도) materials, education materials, FSS and FSC press releases, and manually registered documents. Attachments (HWP, HWPX, PDF) are converted to Markdown so the body of each document is searchable and quotable, and every document carries a topic set, a document nature, and a two-sentence summary.
 
 - Endpoint: `https://myfss.eocpa.kr/mcp` (Streamable HTTP, stateless)
+- Protocol: MCP revision `2026-07-28` (per-request metadata, `server/discover`, no handshake) and `2025-11-25` and earlier (`initialize`) are both served on that one endpoint
 - Credential: an eocpa token from [eocpa.kr/token](https://eocpa.kr/token)
 - Nothing to install: register the URL in claude.ai, Claude Desktop, Claude Code, Cursor, or any Streamable HTTP client
 - Landing page (Korean): [eocpa.kr/myfss](https://eocpa.kr/myfss)
