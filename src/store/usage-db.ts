@@ -5,6 +5,7 @@
  * 이 모듈은 쓰기만 한다(집계 조회 API 없음). record()·recordMcpRequest()·prune() 은 절대 throw 하지 않는다.
  *
  * 두 표: tool_calls 는 핸들러까지 간 도구 호출, mcp_requests 는 /mcp 요청 전량(핸드셰이크·거부·405 포함).
+ * daily_calls 는 하루 호출 기준(server/daily-call-limit.ts)의 원장이다 — 토큰 해시·KST 날짜마다 실행된 도구 호출 수.
  */
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
@@ -102,6 +103,13 @@ CREATE TABLE IF NOT EXISTS mcp_requests (
 CREATE INDEX IF NOT EXISTS idx_mr_ts   ON mcp_requests(ts);
 CREATE INDEX IF NOT EXISTS idx_mr_user ON mcp_requests(user_hash);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- 하루 호출 기준 원장 — day = KST 날짜, user_hash = tool_calls 와 같은 SHA-256(토큰), calls = 실행된 도구 호출 수.
+CREATE TABLE IF NOT EXISTS daily_calls (
+  day       TEXT NOT NULL,
+  user_hash TEXT NOT NULL,
+  calls     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, user_hash)
+);
 `;
 
 const DEFAULT_RETENTION_DAYS = 365;
@@ -125,6 +133,9 @@ export class UsageDb {
   private db: Database.Database | null = null;
   private insertStmt: Database.Statement | null = null;
   private mcpStmt: Database.Statement | null = null;
+  private callsAddStmt: Database.Statement | null = null;
+  /** callsAdd 가 원장 정리를 마지막으로 돌린 KST 날짜. */
+  private callsPrunedDay = "";
   /** ip_hash 별 1분 창 — mcp_requests 쓰기 상한(MCP_LOG_PER_IP_PER_MIN). */
   private readonly mcpIpWindow = new Map<string, { start: number; n: number }>();
   private sinceLastPrune = 0;
@@ -215,6 +226,34 @@ export class UsageDb {
     }
   }
 
+  /** 하루 호출 기준 원장 — 그날 이 자격이 실행한 도구 호출 수. 없으면 0. 실패는 호출자(daily-call-limit)가 삼킨다. */
+  callsUsed(day: string, userHash: string): number {
+    const r = this.get().prepare("SELECT calls FROM daily_calls WHERE day = ? AND user_hash = ?").get(day, userHash) as
+      | { calls: number }
+      | undefined;
+    return r ? r.calls : 0;
+  }
+
+  /**
+   * 하루 호출 기준 원장 — 실행된 호출 1건을 더한다. 호출마다 오는 경로라 문장을 재사용하고, 7일 지난 행 정리는
+   * 날이 바뀐 뒤 첫 기록에서만 한다. 실패는 호출자(daily-call-limit)가 삼킨다.
+   */
+  callsAdd(day: string, userHash: string): void {
+    const db = this.get();
+    if (!this.callsAddStmt) {
+      this.callsAddStmt = db.prepare(
+        `INSERT INTO daily_calls(day, user_hash, calls) VALUES(?, ?, 1)
+         ON CONFLICT(day, user_hash) DO UPDATE SET calls = calls + 1`,
+      );
+    }
+    this.callsAddStmt.run(day, userHash);
+    if (this.callsPrunedDay !== day) {
+      this.callsPrunedDay = day;
+      const cutoff = new Date(Date.parse(day + "T00:00:00Z") - 7 * 86_400_000).toISOString().slice(0, 10);
+      db.prepare("DELETE FROM daily_calls WHERE day < ?").run(cutoff);
+    }
+  }
+
   /** IP(해시) 1분 창 카운터 — 창 수가 상한을 넘으면 통째로 비운다(다음 창부터 다시 센다). */
   private mcpLogAllowed(key: string, now: number): boolean {
     const w = this.mcpIpWindow.get(key);
@@ -244,5 +283,6 @@ export class UsageDb {
     this.db = null;
     this.insertStmt = null;
     this.mcpStmt = null;
+    this.callsAddStmt = null;
   }
 }

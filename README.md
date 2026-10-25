@@ -121,6 +121,9 @@ npm start         # HTTP on :8080 — /mcp and /mcp/playmcp
 | `RATE_LIMIT_RPM`, `CORS_ORIGIN` | Per-IP request limit (default 300) and CORS origin (default `*`) |
 | `PLAYMCP_LIMIT`, `PLAYMCP_LIMIT_UNIT` | PlayMCP channel budget (default `24000`, `chars`) |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated `Origin` allowlist for `/mcp` (DNS-rebinding guard). Requests without an `Origin` header and localhost origins always pass |
+| `DAILY_CALL_THRESHOLD` | Per-token daily (KST) tool-call threshold (default `5000`, `0` = off). Above it calls are slowed, not rejected |
+| `SLOW_CALL_INTERVAL_MS` | Start spacing for calls of a token above the threshold (default `5000` — 720 per hour) |
+| `SLOW_CALL_MAX_WAIT_MS` | A slowed call whose turn is further away than this is returned at once as `busy:slow` (default `20000`) |
 
 Layout:
 

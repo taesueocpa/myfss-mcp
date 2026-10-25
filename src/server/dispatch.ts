@@ -1,7 +1,8 @@
 /**
  * 디스패치 — 핸들러 앞뒤의 고정 시퀀스 (명명 함수, 프레임워크 아님).
  *
- * 시퀀스: 핸들러 실행 → [playmcp] 응답 예산 집행 → (실패 시 오류 분류 · [playmcp] 오류 문구 클램프)
+ * 시퀀스: 하루 호출 기준(daily-call-limit.ts — 넘은 자격은 감속 대기·셈) → 핸들러 실행 → 감속 안내(daily_calls)
+ *        → [playmcp] 응답 예산 집행 → (실패 시 오류 분류 · [playmcp] 오류 문구 클램프)
  *        → finally 에 usage 기록. 기록은 호출 1건=1행이고 절대 예외를 내지 않는다(sink 소유).
  * full 프로필(메인 /mcp·stdio)은 채널 처리가 전부 꺼진 경로다.
  * 채널 기본값(lite)은 여기가 아니라 스키마다(playmcp-profile.ts inputShapeFor).
@@ -11,6 +12,7 @@ import type { ToolContext, ToolSpec } from "../tools/spec.js";
 import type { TextResult } from "../core/result.js";
 import { enforcePlaymcpBudget, clampPlaymcpErrorText } from "./playmcp-budget.js";
 import type { ChannelOptions } from "./playmcp-profile.js";
+import { sharedDailyCallLimiter } from "./daily-call-limit.js";
 
 /** 도구 호출에서 포렌식용 조회 대상 1개를 뽑는다(검색어·문서번호 등). 운영자에게만 노출된다. */
 export function pickTarget(args: Record<string, unknown>): string | null {
@@ -48,13 +50,18 @@ export function wrapHandler(
   spec: ToolSpec<any>,
   ctx: ToolContext,
   ch: ChannelOptions = { profile: "full", mainEndpoint: "" },
-): (args: Record<string, unknown>) => Promise<TextResult> {
-  return async (args) => {
+): (args: Record<string, unknown>, reqCtx?: { mcpReq?: { signal?: AbortSignal } }) => Promise<TextResult> {
+  return async (args, reqCtx) => {
     const t0 = Date.now();
     let status: "ok" | "error" = "ok";
     let errCode: string | undefined;
     try {
-      return enforceBudgetOnResult(await spec.handler(args, ctx), ch);
+      // [하루 호출 기준] 자격마다 하루 실행 수가 기준(기본 5,000)을 넘으면 5초에 1건으로 늦춘다 — 차례가 너무 멀면
+      //   busy:slow 로 돌려보낸다. 요청의 abort 신호를 넘겨 끊긴 호출은 대기에서 빠진다. 대상이 아니면 null(그대로).
+      const ticket = await sharedDailyCallLimiter().enter(ctx.session, ctx.usage, reqCtx?.mcpReq?.signal);
+      ticket?.commit();
+      const res = await spec.handler(args, ctx);
+      return enforceBudgetOnResult(ticket ? ticket.annotate(res) : res, ch);
     } catch (e) {
       status = "error";
       errCode = classifyError(e);

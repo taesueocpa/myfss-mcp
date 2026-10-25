@@ -166,7 +166,11 @@ export function createApp(deps: AppDeps): express.Express {
    */
   const sessionFromRequest = (request: Request | undefined) => {
     const h = request?.headers;
-    const key = request ? new URL(request.url).searchParams.get("key") : null;
+    // ?key= 는 Express 의 req.query 와 같은 꼴로 읽는다 — 정확히 하나일 때만 값이고, 여러 번 오면 없는 것으로 본다.
+    // Express 는 반복된 키를 배열로 읽어 인증 게이트가 헤더 토큰을 쓰므로, 여기서 첫 값을 쓰면 인증받은 토큰과 다른
+    // 해시로 세어진다(하루 호출 기준이 자격 해시로 센다).
+    const keys = request ? new URL(request.url).searchParams.getAll("key") : [];
+    const key = keys.length === 1 ? keys[0] : null;
     const provided = extractToken(key ?? undefined, {
       authorization: h?.get("authorization") ?? undefined,
       "x-eocpa-token": h?.get("x-eocpa-token") ?? undefined,
