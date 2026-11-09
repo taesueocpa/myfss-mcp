@@ -135,7 +135,10 @@ src/store/           SQLite schema, FTS definition, usage log
 src/search/          query tokenizer (FTS / LIKE split)
 ```
 
-## Related
+## Links
 
-- [MyKIFRS MCP](https://github.com/taesueocpa/mykifrs-mcp) — Korean accounting standards and authoritative Q&A
+- Service page (Korean): [eocpa.kr/myfss](https://eocpa.kr/myfss)
+- Companion MCP services — one eocpa token works for all three:
+  - [MyDART MCP](https://github.com/taesueocpa/mydart-mcp) — Korean OpenDART disclosures, financial statements and audit reports (KAM, going concern, ICFR)
+  - [MyKIFRS MCP](https://github.com/taesueocpa/mykifrs-mcp) — Korean accounting standards and authoritative Q&A
 - [eocpa.kr](https://eocpa.kr) — hub and token issuance
