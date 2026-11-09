@@ -1,29 +1,3 @@
-/**
- * 원격 HTTP 모드. stateless: 요청마다 서버+트랜스포트 생성.
- *
- * 라우트:
- *  - POST /mcp         메인 채널 — 무절단
- *  - POST /mcp/playmcp PlayMCP 채널 — 응답 예산 가드 + 채널 기본값 + 운영 도구 미등록
- *                      (playmcp-profile.ts). 두 MCP 경로의 차이는 프로필뿐 — Origin 검증·인증·
- *                      레이트리밋·usage 로깅은 공통. 두 경로 모두 era 를 가린다(modern.ts
- *                      `isLegacyRequest`): 모던(MCP 2026-07-28)은 `createMcpHandler` 레그가,
- *                      2025-era(initialize 핸드셰이크)는 Streamable HTTP 전송 레그가 맡는다.
- *  - GET  /health      공개 헬스체크
- *  - GET  / · /token · POST /signup → eocpa.kr 로 리다이렉트(랜딩·토큰 발급 페이지)
- *
- * /mcp 의 `tools/call` 만 자격을 요구한다(auth.ts) — 관리자 토큰은 로컬 판정, 발급 토큰은
- * eocpa.kr/validate 원격 검증(token-gate.ts).
- * usage 는 두 층이다: 도구 호출은 dispatch.ts 가 tool_calls 에, /mcp 요청 전량(Origin 403·429·401·
- * 403·503·405 포함)은 이 파일의 logMcpRequest 가 mcp_requests 에 남긴다.
- * 코퍼스(fss.sqlite)가 없어도 부팅한다 — /mcp 만 503 을 낸다.
- *
- * env:
- *  - PORT (기본 8080), FSS_DB_PATH (기본 data/fss.sqlite)
- *  - MCP_TOKEN (관리자 토큰), TOKEN_VALIDATE_URL (기본 https://eocpa.kr/validate)
- *  - CORS_ORIGIN (기본 *), RATE_LIMIT_RPM (기본 300, IP당)
- *  - PLAYMCP_LIMIT · PLAYMCP_LIMIT_UNIT (playmcp-budget.ts — 기본 24000 chars)
- *  - MCP_ALLOWED_ORIGINS (/mcp Origin 허용목록, 콤마 구분 — 부재 Origin 은 항상 통과)
- */
 import { createMcpHandler, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from "@modelcontextprotocol/node";
 import express from "express";
@@ -42,28 +16,21 @@ const HUB_LANDING_URL = "https://eocpa.kr/myfss";
 const HUB_TOKEN_URL = "https://eocpa.kr/token";
 const HUB_SIGNUP_URL = "https://eocpa.kr/signup";
 
-/**
- * 실제 클라이언트 IP — 이 파일의 IP 판정은 전부 여기를 지난다(레이트리밋 버킷과 usage ip_hash 가
- * 갈라지지 않게). Fly 가 엣지에서 덮어쓰는 Fly-Client-IP 를 먼저 보고, 헤더가 없으면(로컬) req.ip
- * (trust proxy 1)로 떨어진다.
- */
+// Fly 프록시 뒤에서는 Fly-Client-IP 가 실제 클라이언트 IP 다. 레이트리밋과 usage 가 같은 값을 쓴다
 export function clientIp(req: express.Request): string {
   return (req.headers["fly-client-ip"] as string | undefined) || req.ip || req.socket.remoteAddress || "unknown";
 }
 
 export interface AppDeps {
-  /** 코퍼스 핸들 — 지연 개방이라 null 이면 /mcp 503. */
   getDb: () => Database.Database | null;
   usage: UsageDb;
   gate: TokenGate;
   corsOrigin?: string;
   rateLimitRpm?: number;
   limiter?: RateLimiter;
-  /** /mcp Origin 허용목록(MCP_ALLOWED_ORIGINS) — localhost 계열은 목록과 무관하게 항상 허용. */
   allowedOrigins?: readonly string[];
 }
 
-/** Express 앱 조립. */
 export function createApp(deps: AppDeps): express.Express {
   const { getDb, usage, gate, allowedOrigins = [] } = deps;
   const CORS_ORIGIN = deps.corsOrigin ?? "*";
@@ -89,9 +56,6 @@ export function createApp(deps: AppDeps): express.Express {
     next();
   });
 
-  // /mcp 요청 로그(usage mcp_requests) — 응답이 확정될 때 1행. 요청 하나가 지나는 세 갈래(Origin 403 ·
-  // POST 핸들러 · GET/DELETE 405) 중 정확히 한 곳에서만 건다. 응답 전에 끊긴 연결은 finish 가 안 나
-  // 남지 않는다. 폭주는 UsageDb 의 IP 당 분당 상한이 끊는다.
   const logMcpRequest = (req: express.Request, res: express.Response, token: string | undefined) => {
     const startedAt = Date.now();
     const body = Array.isArray(req.body) ? req.body[0] : req.body;
@@ -112,7 +76,6 @@ export function createApp(deps: AppDeps): express.Express {
     });
   };
 
-  // [MCP 스펙 MUST] /mcp·/mcp/playmcp Origin 검증 — 부재는 통과, 존재하는데 허용목록 밖이면 403(auth.ts).
   app.use("/mcp", (req, res, next) => {
     const origin = req.headers.origin;
     if (origin === undefined || isAllowedMcpOrigin(origin, allowedOrigins)) return next();
@@ -129,8 +92,6 @@ export function createApp(deps: AppDeps): express.Express {
     });
   });
 
-  // ── 웹 표면 리다이렉트 (랜딩·토큰 발급은 eocpa.kr) ──────────────
-
   app.get("/", (req, res) => {
     const host = req.hostname ?? "";
     if (host.startsWith("myfss.")) return res.redirect(301, HUB_LANDING_URL);
@@ -141,12 +102,10 @@ export function createApp(deps: AppDeps): express.Express {
     res.redirect(301, HUB_TOKEN_URL);
   });
 
-  // 308 = 메서드·본문 보존 — 구 폼에서 제출해도 새 창구로 그대로 재전송된다.
+  // 308 은 메서드와 본문을 유지한다
   app.post("/signup", (_req, res) => {
     res.redirect(308, HUB_SIGNUP_URL);
   });
-
-  // ── 헬스체크 ──────────────────────────────────────────────────────
 
   app.get("/health", (_req, res) => {
     const d = getDb();
@@ -154,21 +113,14 @@ export function createApp(deps: AppDeps): express.Express {
     if (d) {
       try {
         docs = (d.prepare(`SELECT COUNT(*) n FROM documents`).get() as { n: number }).n;
-      } catch { /* 일시 오류 무시 */ }
+      } catch { }
     }
     res.json({ status: "ok", db: d ? "ready" : "missing", docs, name: SERVER_NAME, version: VERSION });
   });
 
-  /**
-   * 모던 레그의 usage 세션 — 팩토리는 요청 객체만 받으므로(McpRequestContext.requestInfo) 토큰을
-   * 여기서 다시 꺼낸다. 슬롯 우선순위·판정은 auth.ts `extractToken` 한 곳이 소유하고, 이 함수는
-   * web `Request` 를 그 입력 꼴로 옮기는 어댑터일 뿐이다(정책 복제가 아니다).
-   */
   const sessionFromRequest = (request: Request | undefined) => {
     const h = request?.headers;
-    // ?key= 는 Express 의 req.query 와 같은 꼴로 읽는다 — 정확히 하나일 때만 값이고, 여러 번 오면 없는 것으로 본다.
-    // Express 는 반복된 키를 배열로 읽어 인증 게이트가 헤더 토큰을 쓰므로, 여기서 첫 값을 쓰면 인증받은 토큰과 다른
-    // 해시로 세어진다(하루 호출 기준이 자격 해시로 센다).
+    // ?key= 가 여럿이면 인증 게이트와 같이 없는 것으로 본다
     const keys = request ? new URL(request.url).searchParams.getAll("key") : [];
     const key = keys.length === 1 ? keys[0] : null;
     const provided = extractToken(key ?? undefined, {
@@ -184,13 +136,6 @@ export function createApp(deps: AppDeps): express.Express {
     };
   };
 
-  /**
-   * 모던(2026-07-28) 레그 — **프로세스당 프로필별 1벌**. 핸들러가 요청마다 팩토리를 부르므로
-   * 서버 인스턴스는 여전히 요청 단위다(stateless).
-   *   legacy: "reject" = 이 레그는 모던 전용이고 2025-era 는 아래 전송 배선이 그대로 서빙한다.
-   *   responseMode: "json" = 중간 알림을 보내지 않으므로 단일 JSON 응답.
-   * 코퍼스가 없으면(getDb null) 여기까지 오지 않는다 — 아래 핸들러가 먼저 503 을 낸다.
-   */
   const modernMcp: Record<McpProfile, ReturnType<typeof toNodeHandler>> = {
     full: toNodeHandler(
       createMcpHandler(
@@ -212,19 +157,14 @@ export function createApp(deps: AppDeps): express.Express {
     ),
   };
 
-  // ── MCP ───────────────────────────────────────────────────────────
-
   const mcpHandler = (profile: McpProfile) => async (req: express.Request, res: express.Response) => {
     const provided = extractToken(req.query.key, req.headers);
-    logMcpRequest(req, res, provided); // 레이트리밋 앞 — 429 도 남긴다(IP 당 상한 안에서)
+    logMcpRequest(req, res, provided); // 레이트리밋보다 앞에 둬야 429 도 기록된다
     if (rateLimited(clientIp(req))) {
       return res.status(429).json({
         jsonrpc: "2.0", error: { code: -32000, message: "rate limit exceeded" }, id: null,
       });
     }
-    // 자격 요구 범위와 거부 코드는 auth.ts 가 판정한다:
-    //   ① tools/call 만 자격을 요구한다 — 핸드셰이크·디스커버리(initialize·tools/list·ping)는 무자격 통과.
-    //   ② 제시됐으나 거부된 자격은 403, 미제시만 401.
     if (requiresCredential(req.body) && !(await gate.authorize(provided))) {
       return res.status(deniedStatus(provided)).json({
         jsonrpc: "2.0",
@@ -237,7 +177,6 @@ export function createApp(deps: AppDeps): express.Express {
         id: (Array.isArray(req.body) ? req.body[0]?.id : req.body?.id) ?? null,
       });
     }
-    // 도구 사용량 로깅용 세션 — 이용자=토큰 해시(원문 미저장), 운영자=관리자 토큰 일치.
     const session = {
       userHash: hashToken(provided),
       isOwner: gate.isAdmin(provided),
@@ -252,19 +191,15 @@ export function createApp(deps: AppDeps): express.Express {
       });
     }
     try {
-      // era 분기 — SDK 자신의 분류기로 가린다. 모던 envelope(요청마다 `_meta` 로 버전을 주장하는
-      // 2026-07-28)이면 modern 레그, 아니면(`initialize`·2025-era POST) 아래 전송 레그다.
-      // express.json 이 본문을 이미 소진했으므로 parsedBody 로 넘긴다(스트림 재독 없음).
       const legacyEra = await isLegacyRequest(await toWebRequest(req, req.body), req.body);
       if (!legacyEra) {
-        // 모던(2026-07-28) — discover·resultType·헤더-본문 대조·캐시 힌트는 SDK 가 처리한다.
         await modernMcp[profile](req, res, req.body);
         return;
       }
 
       const server = buildServer({ corpus: d, usage, session }, { profile });
       const transport = new NodeStreamableHTTPServerTransport({
-        sessionIdGenerator: undefined, // stateless
+        sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
       res.on("close", () => {
@@ -286,7 +221,6 @@ export function createApp(deps: AppDeps): express.Express {
   app.post("/mcp", mcpHandler("full"));
   app.post("/mcp/playmcp", mcpHandler("playmcp"));
 
-  // stateless 모드: 세션 스트림/종료 미지원
   const noSession = (req: express.Request, res: express.Response) => {
     logMcpRequest(req, res, extractToken(req.query.key, req.headers));
     res.status(405).json({
@@ -304,10 +238,8 @@ export async function serveHttp(): Promise<void> {
   const PORT = Number(process.env.PORT ?? 8080);
   const ADMIN_TOKEN = process.env.MCP_TOKEN;
   const validateUrl = process.env.TOKEN_VALIDATE_URL ?? "https://eocpa.kr/validate";
-  // 발급 토큰 원격 검증 — fail-closed, 유효 5분·무효 1분 캐시.
   const gate = new TokenGate({ adminToken: ADMIN_TOKEN, validateUrl, svc: "fss" });
 
-  // 코퍼스는 지연 개방 — 없거나 FTS 미구축이면 null 로 접고 /mcp 만 503. 같은 사유는 1회만 로그.
   let db: Database.Database | null = null;
   let lastCorpusError = "";
   const getDb = (): Database.Database | null => {

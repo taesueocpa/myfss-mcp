@@ -22,12 +22,11 @@ export const getDocument = defineTool({
 - Continue with offset_chars; raising max_chars grows the whole response.`,
   input: {
     ntt_id: z.number().describe("search_documents/list_recent가 반환한 ntt_id"),
-    // 기본값 숫자를 문구에 적지 않는다 — 채널마다 default 가 다르고(PlayMCP 18,000), 값은 스키마 default 가 정본이다.
+    // 채널마다 기본값이 달라 문구에 숫자를 쓰지 않는다
     max_chars: z.number().optional().default(60000).describe("본문 최대 길이(자)"),
     offset_chars: z.number().optional().default(0).describe("본문 시작 오프셋 (긴 문서 이어읽기)"),
   },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  // PlayMCP 채널 기본값 — 응답 24,000자 예산 안에 드는 값. offset_chars 이어읽기와 truncated 표식으로 전체를 읽는다.
   liteDefaults: { max_chars: 18000 },
   handler: async ({ ntt_id, max_chars, offset_chars }, { corpus }) => {
     const doc = corpus.prepare(`
@@ -43,7 +42,6 @@ export const getDocument = defineTool({
     const parts = atts
       .filter((a) => a.parse_status === "ok" && a.markdown)
       .map((a) => `## 첨부: ${a.file_name}\n\n${a.markdown}`);
-    // 첨부 본문이 없으면 상세페이지 HTML 본문(documents.markdown, 주로 FSC)으로 폴백
     const full = parts.join("\n\n---\n\n") || (doc.markdown ?? "");
     const body = full.slice(offset_chars, offset_chars + max_chars);
 

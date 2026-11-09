@@ -1,9 +1,3 @@
-/**
- * 문서 도구 공유 사전·정형화 — search_documents·get_document·list_recent 가 함께 쓴다.
- *
- * BOARD 비대칭은 유선 계약이다: 파라미터는 영문 키("press"…)를 받고 응답은 한글
- * 라벨("보도자료"…)을 돌려준다 — 각 도구 [Rules] 가 이 비대칭을 명시한다.
- */
 import type Database from "better-sqlite3";
 
 export const BOARD_LABEL: Record<string, string> = {
@@ -33,7 +27,7 @@ export const BOARD_KEY: Record<string, string> = {
   manual: "MANUAL",
 };
 
-/** board 파라미터 enum 값 — 세 도구의 zod enum 이 이 배열 하나에서 나온다. */
+// board 파라미터는 영문 키를 받고 응답은 한글 라벨을 낸다(의도한 비대칭)
 export const BOARD_PARAM_VALUES = [
   "press", "guidance", "modelnotes", "manual", "trend", "extaudit", "icfr",
   "education", "sanction_case", "sanction_corp", "fsc_press",
@@ -51,10 +45,6 @@ export interface DocRow {
   snippet?: string;
 }
 
-/**
- * 목록 행 정형화 — 태그·부서를 조인 문자열로 붙인다(", " / " / ").
- * HTTP 는 요청마다 서버를 새로 만들므로 호출당 prepare 로 충분하다(요청당 prepare 와 등가).
- */
 export function decorate(db: Database.Database, r: DocRow) {
   const topics = db.prepare(`
     SELECT GROUP_CONCAT(t.name, ', ') s FROM document_tags dt

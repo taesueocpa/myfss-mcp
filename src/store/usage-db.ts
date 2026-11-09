@@ -1,12 +1,3 @@
-/**
- * usage.sqlite — 도구 호출 사용량 이벤트 로그. fss.sqlite 와 분리된 별도 파일이다(운영 데이터).
- *
- * 식별자: 이용자 = 접속 토큰. 원문은 저장하지 않고 SHA-256 해시만 둔다.
- * 이 모듈은 쓰기만 한다(집계 조회 API 없음). record()·recordMcpRequest()·prune() 은 절대 throw 하지 않는다.
- *
- * 두 표: tool_calls 는 핸들러까지 간 도구 호출, mcp_requests 는 /mcp 요청 전량(핸드셰이크·거부·405 포함).
- * daily_calls 는 하루 호출 기준(server/daily-call-limit.ts)의 원장이다 — 토큰 해시·KST 날짜마다 실행된 도구 호출 수.
- */
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { mkdirSync, existsSync } from "node:fs";
@@ -14,20 +5,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-/** Fly 등 배포 환경에서는 USAGE_DB_PATH(예: /data/usage.sqlite)로 재지정. 로컬 기본은 ./data/usage.sqlite. */
 export const USAGE_DB_PATH = process.env.USAGE_DB_PATH ?? join(ROOT, "data", "usage.sqlite");
 
-/** 토큰 → 안정적 익명 식별자(SHA-256 hex). 원문 미저장. */
 export function hashToken(token: string | undefined | null): string | null {
   if (!token) return null;
   return createHash("sha256").update(token).digest("hex");
 }
 
-/** 요청 1건의 신원·경로 — 요청마다 서버를 새로 만들 때 클로저로 주입한다. */
 export interface Session {
-  /** SHA-256(토큰). 관리자 토큰이면 그 해시, 로컬 stdio 면 null. */
   userHash: string | null;
-  /** 운영자(관리자 토큰 일치 또는 로컬 stdio) 여부 — usage 의 is_owner 표식. */
   isOwner: boolean;
   transport: "http" | "stdio";
   client?: string | null;
@@ -40,25 +26,17 @@ export interface UsageEvent {
   durationMs: number;
   userHash?: string | null;
   isOwner?: boolean;
-  /** 원시 조회 대상(검색어·문서번호 등). 포렌식용 — 운영자에게만 노출. */
   target?: string | null;
   errCode?: string | null;
   client?: string | null;
 }
 
-/** /mcp HTTP 요청 1건 — 응답이 확정될 때(res finish) 기록한다. */
 export interface McpRequestEvent {
-  /** JSON-RPC method(POST — 배치면 첫 항목). 본문이 없는 GET·DELETE(405)는 HTTP 메서드. */
   method?: string | null;
-  /** tools/call 이면 도구명. */
   tool?: string | null;
-  /** HTTP 상태코드. */
   status: number;
-  /** 제시한 토큰 원문 — 여기서 해시하고 버린다. 미제시면 "" 또는 null. */
   token?: string | null;
-  /** 관리자 토큰(MCP_TOKEN) 일치. */
   isOwner?: boolean;
-  /** 클라이언트 IP — 앞 16 hex 해시만 저장한다. */
   ip?: string | null;
   ua?: string | null;
   durationMs: number;
@@ -114,12 +92,7 @@ CREATE TABLE IF NOT EXISTS daily_calls (
 
 const DEFAULT_RETENTION_DAYS = 365;
 const PRUNE_EVERY = 500;
-/**
- * mcp_requests 쓰기 상한 — IP(해시)당 1분에 이만큼만 남기고 나머지는 세지 않는다.
- * initialize·tools/list 는 무자격으로 열려 있어, 상한이 없으면 요청 폭주가 그대로 영속 볼륨 쓰기가 된다.
- * IP당 분당 300 레이트리밋이 있는 배포에서도 한도에 걸린 429 가 몇 줄은 남도록 그보다 조금 크게 잡았다.
- * 정상 이용은 여기에 닿지 않는다.
- */
+// 자격 없이 열린 요청이 몰려도 디스크 쓰기가 늘지 않게 IP당 분당 기록 수를 묶는다
 export const MCP_LOG_PER_IP_PER_MIN = 360;
 const MCP_IP_WINDOW_CAP = 10_000;
 
@@ -134,9 +107,7 @@ export class UsageDb {
   private insertStmt: Database.Statement | null = null;
   private mcpStmt: Database.Statement | null = null;
   private callsAddStmt: Database.Statement | null = null;
-  /** callsAdd 가 원장 정리를 마지막으로 돌린 KST 날짜. */
   private callsPrunedDay = "";
-  /** ip_hash 별 1분 창 — mcp_requests 쓰기 상한(MCP_LOG_PER_IP_PER_MIN). */
   private readonly mcpIpWindow = new Map<string, { start: number; n: number }>();
   private sinceLastPrune = 0;
 
@@ -160,7 +131,6 @@ export class UsageDb {
     return db;
   }
 
-  /** 호출 1건 기록. **절대 throw 하지 않는다.** */
   record(ev: UsageEvent): void {
     try {
       const db = this.get();
@@ -190,14 +160,9 @@ export class UsageDb {
     }
   }
 
-  /**
-   * /mcp 요청 1건 기록. **절대 throw 하지 않는다**(응답 경로에서 호출).
-   * IP 당 분당 MCP_LOG_PER_IP_PER_MIN 건을 넘으면 기록하지 않는다.
-   */
   recordMcpRequest(ev: McpRequestEvent): void {
     try {
       const ts = Date.now();
-      // ip_hash = SHA-256(IP) 앞 16 hex — 같은 계산을 쓰는 서버끼리는 같은 IP 가 같은 값이 된다.
       const ipHash = ev.ip ? createHash("sha256").update(ev.ip).digest("hex").slice(0, 16) : null;
       if (!this.mcpLogAllowed(ipHash ?? "", ts)) return;
       const db = this.get();
@@ -226,7 +191,6 @@ export class UsageDb {
     }
   }
 
-  /** 하루 호출 기준 원장 — 그날 이 자격이 실행한 도구 호출 수. 없으면 0. 실패는 호출자(daily-call-limit)가 삼킨다. */
   callsUsed(day: string, userHash: string): number {
     const r = this.get().prepare("SELECT calls FROM daily_calls WHERE day = ? AND user_hash = ?").get(day, userHash) as
       | { calls: number }
@@ -234,10 +198,6 @@ export class UsageDb {
     return r ? r.calls : 0;
   }
 
-  /**
-   * 하루 호출 기준 원장 — 실행된 호출 1건을 더한다. 호출마다 오는 경로라 문장을 재사용하고, 7일 지난 행 정리는
-   * 날이 바뀐 뒤 첫 기록에서만 한다. 실패는 호출자(daily-call-limit)가 삼킨다.
-   */
   callsAdd(day: string, userHash: string): void {
     const db = this.get();
     if (!this.callsAddStmt) {
@@ -254,7 +214,6 @@ export class UsageDb {
     }
   }
 
-  /** IP(해시) 1분 창 카운터 — 창 수가 상한을 넘으면 통째로 비운다(다음 창부터 다시 센다). */
   private mcpLogAllowed(key: string, now: number): boolean {
     const w = this.mcpIpWindow.get(key);
     if (!w || now - w.start >= 60_000) {
@@ -274,7 +233,6 @@ export class UsageDb {
       db.prepare("DELETE FROM tool_calls WHERE ts < ?").run(cutoff);
       db.prepare("DELETE FROM mcp_requests WHERE ts < ?").run(cutoff);
     } catch {
-      /* ignore */
     }
   }
 

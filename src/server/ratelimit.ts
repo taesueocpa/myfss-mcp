@@ -1,13 +1,7 @@
-/**
- * IP당 고정 1분 창 레이트리미터 — windowCounter 팩토리 1개.
- *
- * 버킷 키에 접두를 붙여 경로별 한도를 달리 쓸 수 있다. 인메모리·프로세스 로컬(단일 인스턴스 전제).
- */
+// 인메모리 카운터라 인스턴스가 여럿이면 따로 센다
 
 export interface RateLimiter {
-  /** true = 한도 초과(차단). */
   limited(key: string, limit: number): boolean;
-  /** 테스트·종료용 — 청소 타이머 해제. */
   stop(): void;
 }
 
