@@ -10,7 +10,7 @@ function envInt(name: string, def: number): number {
   return Number.isInteger(n) && n >= 0 && n <= 2_147_483_647 ? n : def;
 }
 export const dailyCallThreshold = (): number => envInt("DAILY_CALL_THRESHOLD", 5000);
-export const slowCallIntervalMs = (): number => envInt("SLOW_CALL_INTERVAL_MS", 5000);
+export const slowCallIntervalMs = (): number => envInt("SLOW_CALL_INTERVAL_MS", 20_000);
 export const slowCallMaxWaitMs = (): number => envInt("SLOW_CALL_MAX_WAIT_MS", 20_000);
 
 function kstDay(nowMs: number): string {
