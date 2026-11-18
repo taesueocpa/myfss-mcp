@@ -22,7 +22,6 @@ export const getDocument = defineTool({
 - Continue with offset_chars; raising max_chars grows the whole response.`,
   input: {
     ntt_id: z.number().describe("search_documents/list_recent가 반환한 ntt_id"),
-    // 채널마다 기본값이 달라 문구에 숫자를 쓰지 않는다
     max_chars: z.number().optional().default(60000).describe("본문 최대 길이(자)"),
     offset_chars: z.number().optional().default(0).describe("본문 시작 오프셋 (긴 문서 이어읽기)"),
   },

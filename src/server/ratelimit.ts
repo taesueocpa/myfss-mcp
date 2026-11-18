@@ -1,5 +1,3 @@
-// 인메모리 카운터라 인스턴스가 여럿이면 따로 센다
-
 export interface RateLimiter {
   limited(key: string, limit: number): boolean;
   stop(): void;

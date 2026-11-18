@@ -2,7 +2,11 @@ import { z } from "zod";
 import { defineTool } from "./spec.js";
 import { asText } from "../core/result.js";
 import { splitQuery } from "../search/query.js";
+import { makeSnippet, queryTerms, relevance } from "../search/rank.js";
 import { BOARD_KEY, BOARD_PARAM_VALUES, decorate, type DocRow } from "./doc-shared.js";
+import { docIndex, findDocs, rankDocs, rankStats } from "./search-index.js";
+
+const NOTE = "수록 문서는 2010년 이후 회계·공시 자료 (2010년 이전 구문서는 미수록)";
 
 export const searchDocuments = defineTool({
   name: "search_documents",
@@ -20,7 +24,7 @@ export const searchDocuments = defineTool({
 - snippet marks matches with [ … ]; only when a query matched.`,
   rules: `- board is asymmetric: param = English key, response = 한글 라벨 — never feed it back.
 - topics·depts are joined strings (", " / " / "), not arrays — split first.
-- ≥3-char tokens → FTS (AND, rank); 1~2-char → LIKE. No query → 게시일 DESC, no snippet.
+- All tokens must appear (substring); 제목 hits rank first. No query → 게시일 DESC, no snippet.
 - Corpus = 2010 onward (absent = 미수록); quote body via get_document, not summary·snippet.`,
   input: {
     query: z.string().optional().describe("검색 키워드 (공백 구분, 예: '전환사채 콜옵션')"),
@@ -39,21 +43,6 @@ export const searchDocuments = defineTool({
   handler: async ({ query, topics, nature, board, source, dept, date_from, date_to, limit, offset }, { corpus }) => {
     const conds: string[] = [];
     const params: unknown[] = [];
-    let match = "";
-    let short: string[] = [];
-
-    if (query?.trim()) {
-      ({ match, short } = splitQuery(query));
-      if (match) {
-        conds.push(`docs_fts MATCH ?`);
-        params.push(match);
-      }
-      for (const t of short) {
-        conds.push(`(f.title LIKE ? OR f.summary LIKE ? OR f.body LIKE ?)`);
-        const like = `%${t}%`;
-        params.push(like, like, like);
-      }
-    }
     if (nature) { conds.push(`d.nature = ?`); params.push(nature); }
     if (board) { conds.push(`d.board = ?`); params.push(BOARD_KEY[board]); }
     if (source) { conds.push(`d.source = ?`); params.push(source); }
@@ -69,26 +58,33 @@ export const searchDocuments = defineTool({
                   WHERE dt.ntt_id = d.ntt_id AND t.name IN (${topics.map(() => "?").join(",")}))`);
       params.push(...topics);
     }
-
-    const useFts = Boolean(query?.trim());
-    const from = useFts
-      ? `FROM docs_fts f JOIN documents d ON d.ntt_id = f.ntt_id`
-      : `FROM documents d`;
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-    const order = match ? `ORDER BY rank` : `ORDER BY d.published_at DESC`;
-    const snippetCol = match ? `, snippet(docs_fts, 2, '[', ']', '…', 16) AS snippet` : "";
+    const ROW = `SELECT d.ntt_id, d.published_at, d.title, d.nature, d.summary, d.board, d.source, d.source_url FROM documents d`;
 
-    const rows = corpus.prepare(`
-      SELECT d.ntt_id, d.published_at, d.title, d.nature, d.summary, d.board, d.source, d.source_url ${snippetCol}
-      ${from} ${where} ${order} LIMIT ? OFFSET ?`).all(...params, limit, offset) as DocRow[];
-    const { n } = corpus.prepare(`SELECT COUNT(*) n ${from} ${where}`).get(...params) as { n: number };
+    if (!query?.trim()) {
+      const rows = corpus.prepare(`${ROW} ${where} ORDER BY d.published_at DESC LIMIT ? OFFSET ?`)
+        .all(...params, limit, offset) as DocRow[];
+      const { n } = corpus.prepare(`SELECT COUNT(*) n FROM documents d ${where}`).get(...params) as { n: number };
+      return asText({ total: n, showing: rows.length, offset, note: NOTE, results: rows.map((r) => decorate(corpus, r)) });
+    }
 
-    return asText({
-      total: n,
-      showing: rows.length,
-      offset,
-      note: "수록 문서는 2010년 이후 회계·공시 자료 (2010년 이전 구문서는 미수록)",
-      results: rows.map((r) => decorate(corpus, r)),
+    const ix = docIndex(corpus);
+    const q = queryTerms(query);
+    const allowed = conds.length
+      ? new Set(corpus.prepare(`SELECT d.ntt_id FROM documents d ${where}`).pluck().all(...params) as number[])
+      : undefined;
+    const stats = rankStats(corpus, ix, q);
+    const ranked = rankDocs(findDocs(corpus, ix, splitQuery(query).match, q, allowed), q, stats, offset + limit, relevance);
+
+    const rowStmt = corpus.prepare(`${ROW} WHERE d.ntt_id = ?`);
+    const textStmt = corpus.prepare(`SELECT title, summary, body FROM docs_fts WHERE rowid = ?`);
+    const results = ranked.slice(offset, offset + limit).map((d) => {
+      const row = rowStmt.get(d.ntt_id) as DocRow;
+      const t = textStmt.get(d.rowid) as { title: string | null; summary: string | null; body: string | null } | undefined;
+      const snippet = makeSnippet(t?.body ?? "", q, stats) ?? makeSnippet(t?.summary ?? "", q, stats)
+        ?? makeSnippet(t?.title ?? "", q, stats);
+      return decorate(corpus, snippet ? { ...row, snippet } : row);
     });
+    return asText({ total: ranked.length, showing: results.length, offset, note: NOTE, results });
   },
 });

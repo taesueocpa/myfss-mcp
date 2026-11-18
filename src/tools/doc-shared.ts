@@ -27,7 +27,6 @@ export const BOARD_KEY: Record<string, string> = {
   manual: "MANUAL",
 };
 
-// board 파라미터는 영문 키를 받고 응답은 한글 라벨을 낸다(의도한 비대칭)
 export const BOARD_PARAM_VALUES = [
   "press", "guidance", "modelnotes", "manual", "trend", "extaudit", "icfr",
   "education", "sanction_case", "sanction_corp", "fsc_press",

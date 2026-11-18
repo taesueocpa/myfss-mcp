@@ -3,6 +3,7 @@ import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from "
 import express from "express";
 import type Database from "better-sqlite3";
 import { openCorpus } from "../store/fss-db.js";
+import { warmSearchIndex } from "../tools/search-index.js";
 import { UsageDb, hashToken } from "../store/usage-db.js";
 import { buildServer } from "./build-server.js";
 import { extractToken, requiresCredential, deniedStatus, isAllowedMcpOrigin, allowedOriginsFromEnv } from "./auth.js";
@@ -16,7 +17,6 @@ const HUB_LANDING_URL = "https://eocpa.kr/myfss";
 const HUB_TOKEN_URL = "https://eocpa.kr/token";
 const HUB_SIGNUP_URL = "https://eocpa.kr/signup";
 
-// Fly 프록시 뒤에서는 Fly-Client-IP 가 실제 클라이언트 IP 다. 레이트리밋과 usage 가 같은 값을 쓴다
 export function clientIp(req: express.Request): string {
   return (req.headers["fly-client-ip"] as string | undefined) || req.ip || req.socket.remoteAddress || "unknown";
 }
@@ -102,7 +102,6 @@ export function createApp(deps: AppDeps): express.Express {
     res.redirect(301, HUB_TOKEN_URL);
   });
 
-  // 308 은 메서드와 본문을 유지한다
   app.post("/signup", (_req, res) => {
     res.redirect(308, HUB_SIGNUP_URL);
   });
@@ -120,7 +119,6 @@ export function createApp(deps: AppDeps): express.Express {
 
   const sessionFromRequest = (request: Request | undefined) => {
     const h = request?.headers;
-    // ?key= 가 여럿이면 인증 게이트와 같이 없는 것으로 본다
     const keys = request ? new URL(request.url).searchParams.getAll("key") : [];
     const key = keys.length === 1 ? keys[0] : null;
     const provided = extractToken(key ?? undefined, {
@@ -159,7 +157,7 @@ export function createApp(deps: AppDeps): express.Express {
 
   const mcpHandler = (profile: McpProfile) => async (req: express.Request, res: express.Response) => {
     const provided = extractToken(req.query.key, req.headers);
-    logMcpRequest(req, res, provided); // 레이트리밋보다 앞에 둬야 429 도 기록된다
+    logMcpRequest(req, res, provided);
     if (rateLimited(clientIp(req))) {
       return res.status(429).json({
         jsonrpc: "2.0", error: { code: -32000, message: "rate limit exceeded" }, id: null,
@@ -246,7 +244,8 @@ export async function serveHttp(): Promise<void> {
     if (db) return db;
     try {
       db = openCorpus();
-      console.error(`DB 연결: 코퍼스 준비됨`);
+      warmSearchIndex(db);
+      console.error(`DB 연결: 코퍼스 준비됨 (검색 색인 적재)`);
       return db;
     } catch (err) {
       const msg = err instanceof CorpusError ? err.message : String(err);

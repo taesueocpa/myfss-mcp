@@ -1,4 +1,3 @@
-// 배열 순서가 tools/list 순서다
 import type { ToolSpec } from "./spec.js";
 import { searchDocuments } from "./search-documents.js";
 import { getDocument } from "./get-document.js";

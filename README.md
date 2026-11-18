@@ -27,7 +27,8 @@ Every tool is read-only, idempotent, and local (SQLite + FTS5). No external call
 
 ### Search behavior
 
-- Tokens of three or more characters go to FTS5 (AND-joined, rank-ordered). One- and two-character tokens become `LIKE` filters, because the trigram index cannot match them.
+- Every query token must appear in the title, summary or body (AND, matched as a substring, so two-character terms like 리스 work). Look-alike words are not counted as a match: 리스 does not match inside 리스크 (risk) or 체크리스트 (checklist), 감사 not inside 감사합니다, 공시 not inside 공시지가.
+- Results are ranked by a BM25-style relevance over all tokens: title hits and adjacent phrases (리스변경 / 리스 변경) rank higher, ties go to the newer document. Document text is held in memory as UTF-8 buffers for this (loaded at boot). Snippets appear for every query that matched, short-token queries included.
 - Filters without a query sweep a topic in publication-date order and return no snippet.
 - `board` is asymmetric by design: the parameter takes an English key (`sanction_case`), the response shows the Korean label (`심사·감리 지적사례`). `list_tags` returns both.
 - `summary` and `snippet` are for orientation. Quote `get_document`'s `body`.
@@ -132,7 +133,7 @@ src/main.ts          entry point (stdio by default, --http or MCP_MODE=http for 
 src/tools/           tool registry — the single source of truth for both transports
 src/server/          dispatch, server assembly, auth, token gate, rate limiter, HTTP wiring, PlayMCP profile and budget guard
 src/store/           SQLite schema, FTS definition, usage log
-src/search/          query tokenizer (FTS / LIKE split)
+src/search/          query tokenizer and relevance ranking (pure functions)
 ```
 
 ## Links

@@ -42,7 +42,7 @@ export class TokenGate {
         `${this.cfg.validateUrl}?key=${encodeURIComponent(token)}&svc=${encodeURIComponent(this.cfg.svc)}`,
         { signal: AbortSignal.timeout(VALIDATE_TIMEOUT_MS) },
       );
-      if (!r.ok) return false; // 검증 서버 오류는 차단하고 캐시하지 않는다
+      if (!r.ok) return false;
       const { valid } = (await r.json()) as { valid: boolean };
       this.cache.set(token, { valid, exp: now + (valid ? VALID_TTL_MS : INVALID_TTL_MS) });
       if (this.cache.size > CACHE_CAP) this.cache.clear();

@@ -4,7 +4,6 @@ import type { UsageDb, Session } from "../store/usage-db.js";
 import type { TextResult } from "../core/result.js";
 import { SERVICE_NAME } from "../version.js";
 
-// PlayMCP 는 description 을 1,024자 이하로 요구한다
 export const DESCRIPTION_MAX = 1024;
 
 export interface ToolContext {

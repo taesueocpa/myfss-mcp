@@ -92,7 +92,6 @@ CREATE TABLE IF NOT EXISTS daily_calls (
 
 const DEFAULT_RETENTION_DAYS = 365;
 const PRUNE_EVERY = 500;
-// 자격 없이 열린 요청이 몰려도 디스크 쓰기가 늘지 않게 IP당 분당 기록 수를 묶는다
 export const MCP_LOG_PER_IP_PER_MIN = 360;
 const MCP_IP_WINDOW_CAP = 10_000;
 

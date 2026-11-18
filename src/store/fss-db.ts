@@ -88,15 +88,12 @@ function migrate(db: Database.Database) {
     .map((c) => c.name);
   if (!dcols.includes("nature")) db.exec(`ALTER TABLE documents ADD COLUMN nature TEXT`);
   if (!dcols.includes("summary")) db.exec(`ALTER TABLE documents ADD COLUMN summary TEXT`);
-  // B0000188 보도자료 · B0000127 감독지침 · B0000128 주석공시 모범사례 · MANUAL 수동 등록
   if (!dcols.includes("board"))
     db.exec(`ALTER TABLE documents ADD COLUMN board TEXT NOT NULL DEFAULT 'B0000188'`);
-  // fss 금융감독원 · fsc 금융위원회
   if (!dcols.includes("source"))
     db.exec(`ALTER TABLE documents ADD COLUMN source TEXT NOT NULL DEFAULT 'fss'`);
 }
 
-// 컬럼 순서를 바꾸지 말 것. search_documents 의 snippet(docs_fts, 2, …) 이 body 를 가리킨다
 export function rebuildDocsFts(db: Database.Database): number {
   db.exec(`
   CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(

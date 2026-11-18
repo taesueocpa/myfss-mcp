@@ -6,7 +6,6 @@ function envInt(name: string, def: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === "") return def;
   const n = Number(raw);
-  // setTimeout 은 2^31-1ms 를 넘으면 1ms 로 동작한다
   return Number.isInteger(n) && n >= 0 && n <= 2_147_483_647 ? n : def;
 }
 export const dailyCallThreshold = (): number => envInt("DAILY_CALL_THRESHOLD", 5000);
@@ -95,7 +94,6 @@ export class DailyCallLimiter {
         try {
           await this.sleep(wait, signal);
         } catch (e) {
-          // 마지막 예약일 때만 되돌린다. 앞 예약을 빼면 뒤 호출 간격이 깨진다
           if (this.nextAt.get(hash) === slot + interval) this.nextAt.set(hash, slot);
           throw e;
         }
@@ -155,7 +153,7 @@ export class DailyCallLimiter {
     }
     const before = this.usedToday(hash, day, ledger);
     const n = (before ?? 0) + 1;
-    if (before !== null) this.counts.set(hash, n); // 원장을 못 읽었을 때 0 을 저장하면 그날 내내 적게 센다
+    if (before !== null) this.counts.set(hash, n);
     try {
       ledger.callsAdd?.(day, hash);
     } catch {
